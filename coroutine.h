@@ -25,7 +25,7 @@ class Coroutine;
 class Scheduler;
 
 // the type using to create a coroutine
-using CoroutineFunction = std::function<void(Scheduler *, void *)>;
+using CoroutineFunction = std::function<void(Scheduler *, std::any)>;
 
 using  byte = unsigned char;
 
@@ -43,13 +43,15 @@ public:
     Coroutine(Scheduler* scheduler, CoroutineFunction fun, std::any args);
     ~Coroutine();
 
+
+
     STATUS getState() {return _state;}
 
 private:
     Scheduler* _scheduler;
     ucontext_t _context;
-    int _stacksize;
-    int _capability;
+    ptrdiff_t _stacksize;
+    ptrdiff_t _capability;
     std::unique_ptr<byte> _stack;
     STATUS _state;
 
@@ -59,6 +61,7 @@ private:
     // and with safety and type infomation. see:
     // https://devblogs.microsoft.com/cppblog/stdany-how-when-and-why/
     std::any _args;
+    friend class Scheduler;
 };
 
 
@@ -79,15 +82,23 @@ public:
     //resume a coroutine
     void CoroutineResume(CoroutineID id);
 
+    void SaveCurrentStack(CoroutinePtr pco);
+
+    //should be big enough, or munmap_chunk(): invalid pointer error will happen
     const static int STACKSIZE = 2<<20;
+
+    static void Schedule(uint32_t lo32, uint32_t hi32);
+
+    STATUS CoroutineState(CoroutineID id);
 
 private:
     //map of coroutine
     CoroutineMap _map;
-    byte _stack[STACKSIZE];
+    std::unique_ptr<byte> _stack;
     CoroutineMapIter _currentRuningCoroutine;
-    ucontext_t _mainContext;
+    ucontext_t _schedulerContext;
     CoroutineID _nextID;
+    ptrdiff_t _stackTop;
 };
 
 
