@@ -7,6 +7,8 @@
 using namespace coroutine_mimic;
 using CoroutineID = coroutine_mimic::CoroutineID;
 
+int Coroutine::_id = 0;
+
 Coroutine::Coroutine(Scheduler* scheduler, CoroutineFunction fun, std::any args)
 :   _scheduler(scheduler),
     _context{},
@@ -15,9 +17,10 @@ Coroutine::Coroutine(Scheduler* scheduler, CoroutineFunction fun, std::any args)
     _stack(nullptr),
     _state(STATUS::COROUTINE_READY),
     _function(fun),
-    _args(args)
+    _args(args),
+    _name(std::to_string(_id))
 {
-
+    _id++;
 }
 
 
@@ -82,11 +85,11 @@ void Scheduler::CoroutineResume(CoroutineID id)
         // the `Schedule` will be called imediately.
         makecontext(&pco->_context, (void(*)())Schedule, 2, lo32, hi32);
         
-        std::cout<<"b make\n";
+        //std::cout<<"b make\n";
         // save current context to `_schedulerContext`, and switch to `pco->_context`,
         // so from above was saied, the function `Schedule` will be called.
         swapcontext(&_schedulerContext, &pco->_context);
-        std::cout<<"a make\n";
+        //std::cout<<"a make\n";
 
         break;
     }
@@ -94,7 +97,7 @@ void Scheduler::CoroutineResume(CoroutineID id)
     case STATUS::COROUTINE_SUSPEND:
     {
         //restore stack of suspend coroutine
-        printf("%p, %ld\n", pco->_stack.get(), pco->_stacksize);
+        // printf("my stack: %p, %ld\n", pco->_stack.get(), pco->_stacksize);
         memcpy(_stack.get() + STACKSIZE - pco->_stacksize, pco->_stack.get(), pco->_stacksize);
         _currentRuningCoroutine = _map.find(id);
         pco->_state = STATUS::COROUTINE_RUNNING;
@@ -121,23 +124,26 @@ void Scheduler::CoroutineYield()
 
 void Scheduler::SaveCurrentStack(CoroutinePtr pco)
 {
-    byte guard = 0;
-    printf("b SaveCurrentStack: %ld, %p, %ld\n", _stackTop, &guard, pco->_stacksize);
-    if(pco->_capability < _stackTop - reinterpret_cast<ptrdiff_t>(&guard))
+    //byte guard = 0;
+    // mov  rax, rsp
+    register long rsp asm ("rsp");
+    //printf("b SaveCurrentStack %s: %p, %p, %ld\n", pco->_name.c_str(), pco->_stack.get(), reinterpret_cast<void*>(rsp), pco->_stacksize);
+    // when a coroutine was first here, `_capability` should be zero
+    if(pco->_capability < _stackTop - reinterpret_cast<ptrdiff_t>(rsp))
     {
-        pco->_capability = _stackTop - reinterpret_cast<ptrdiff_t>(&guard);
+        pco->_capability = _stackTop - reinterpret_cast<ptrdiff_t>(rsp);
         pco->_stack.reset(new byte[pco->_capability]);
     }
-    pco->_stacksize = _stackTop - reinterpret_cast<ptrdiff_t>(&guard);
-    printf("a SaveCurrentStack: %ld, %p, %ld\n", _stackTop, &guard, pco->_stacksize);
-    //copy content from &guard to &guard + pco->_stacksize;
-    memcpy(pco->_stack.get(), &guard, pco->_stacksize);
+    pco->_stacksize = _stackTop - reinterpret_cast<ptrdiff_t>(rsp);
+    //printf("a SaveCurrentStack %s: %p, %p, %ld\n", pco->_name.c_str(), pco->_stack.get(), reinterpret_cast<void*>(rsp), pco->_stacksize);
+    // copy content from &guard to &guard + pco->_stacksize;
+    memcpy(pco->_stack.get(), (void*)rsp, pco->_stacksize);
 
 }
 
 void Scheduler::Schedule(uint32_t lo32, uint32_t hi32)
 {
-    std::cout<<"b  Schedule"<<std::endl;
+    //std::cout<<"b  Schedule"<<std::endl;
     // this function was enter from `swapcontext`
     // get the scheduler from two ints.
     Scheduler *sch = reinterpret_cast<Scheduler*>(lo32|((uint64_t)hi32<<32));
@@ -148,7 +154,7 @@ void Scheduler::Schedule(uint32_t lo32, uint32_t hi32)
     pco->_function(sch, pco->_args);
     sch->_map.erase(cur);
     sch->_currentRuningCoroutine = sch->_map.end();
-    std::cout<<"a  Schedule"<<std::endl;
+    //std::cout<<"a  Schedule"<<std::endl;
     
 }
 
